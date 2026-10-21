@@ -107,7 +107,8 @@ info "Dry run: fetching forecast from the NWS API..."
 if runuser -u "$APP_USER" -- /usr/bin/python3 "$SCRIPT" --dry-run >/dev/null; then
   info "NWS API reachable and forecast parsed OK."
 else
-  warn "Dry run failed - check network/DNS from this container, then run: runuser -u $APP_USER -- python3 $SCRIPT --dry-run"
+  warn "Dry run failed (see error above). Common causes: a bad value in config.env, or no network/DNS from this container."
+  warn "Re-check with: runuser -u $APP_USER -- python3 $SCRIPT --dry-run"
 fi
 
 echo
