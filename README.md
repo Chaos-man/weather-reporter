@@ -4,6 +4,12 @@ Daily weather report for Discord. Pulls the National Weather Service forecast, t
 
 Runs from cron in a small Proxmox LXC. Python standard library only; no pip packages, no API keys.
 
+## Requirements
+
+- Python 3.7 or newer, standard library only (Debian 12 ships 3.11). `setup.sh` installs `python3` if it's missing.
+- Outbound HTTPS to `api.weather.gov` and `discord.com`
+- A US location (the NWS API covers the US and its territories)
+
 ## What the report shows
 
 | Line | Source |
