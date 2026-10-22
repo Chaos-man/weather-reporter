@@ -23,7 +23,7 @@ jobs:
         run: |
           version=$(python3 weather_report.py --version | awk '{print $2}')
           if [ "$GITHUB_REF_NAME" != "v$version" ]; then
-            echo "::error::Tag $GITHUB_REF_NAME doesn't match __version__ $version in weather_report.py"
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match __version__ $version in src/__init__.py"
             exit 1
           fi
 

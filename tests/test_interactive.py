@@ -9,6 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import weather_report as wr  # noqa: E402
+from src import wizard  # noqa: E402
 
 WEBHOOK = "https://discord.com/api/webhooks/1562538190261452942/IACEvp57TPuvBTMR2WZmO4AdQLcU"
 NEW_WEBHOOK = "https://discord.com/api/webhooks/999/newtoken"
@@ -34,23 +35,23 @@ def run(argv, existing, answers, lookup=lambda q: [EVANS_GA]):
     args = wr.build_parser().parse_args(argv)
     script = Script(*answers)
     with contextlib.redirect_stdout(io.StringIO()) as out:
-        args = wr.ask_setup_questions(args, existing, ask_fn=script, lookup=lookup)
-        values = wr.collect_values(args, existing)
+        args = wizard.ask_setup_questions(args, existing, ask_fn=script, lookup=lookup)
+        values = wizard.collect_values(args, existing)
     return values, script, out.getvalue()
 
 
 class TestHelpers(unittest.TestCase):
     def test_mask_webhook(self):
-        self.assertEqual(wr.mask_webhook(WEBHOOK),
+        self.assertEqual(wizard.mask_webhook(WEBHOOK),
                          "https://discord.com/api/webhooks/1562538190261452942/****QLcU")
-        self.assertNotIn("IACEvp57", wr.mask_webhook(WEBHOOK))
+        self.assertNotIn("IACEvp57", wizard.mask_webhook(WEBHOOK))
 
     def test_yes_no(self):
         with contextlib.redirect_stdout(io.StringIO()):
-            self.assertTrue(wr.ask_yes_no("q", ask_fn=Script("")))
-            self.assertFalse(wr.ask_yes_no("q", default=False, ask_fn=Script("")))
-            self.assertFalse(wr.ask_yes_no("q", ask_fn=Script("maybe", "N")))
-            self.assertTrue(wr.ask_yes_no("q", ask_fn=Script("yes")))
+            self.assertTrue(wizard.ask_yes_no("q", ask_fn=Script("")))
+            self.assertFalse(wizard.ask_yes_no("q", default=False, ask_fn=Script("")))
+            self.assertFalse(wizard.ask_yes_no("q", ask_fn=Script("maybe", "N")))
+            self.assertTrue(wizard.ask_yes_no("q", ask_fn=Script("yes")))
 
 
 class TestFirstRun(unittest.TestCase):

@@ -12,7 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import weather_report as wr  # noqa: E402
-from src import config, install  # noqa: E402
+from src import config, install, wizard  # noqa: E402
 
 WEBHOOK = "https://discord.com/api/webhooks/123456/abc_DEF-ghi"
 
@@ -59,20 +59,20 @@ class TestValidation(unittest.TestCase):
 class TestCollectValues(unittest.TestCase):
     def test_flags_override_existing_and_defaults(self):
         existing = {"DISCORD_WEBHOOK_URL": WEBHOOK, "RUN_TIME": "06:00", "CONTACT": "old@example.com"}
-        values = wr.collect_values(setup_args(["--time", "7:30", "--freeze-threshold", "34"]), existing)
+        values = wizard.collect_values(setup_args(["--time", "7:30", "--freeze-threshold", "34"]), existing)
         self.assertEqual(values["RUN_TIME"], "07:30")          # flag, normalized
         self.assertEqual(values["FREEZE_THRESHOLD_F"], "34")   # flag
         self.assertEqual(values["CONTACT"], "old@example.com")  # existing
         self.assertEqual(values["RAIN_THRESHOLD"], "30")       # default
 
     def test_lat_lon_and_location_label(self):
-        values = wr.collect_values(setup_args(
+        values = wizard.collect_values(setup_args(
             ["--webhook", WEBHOOK, "--location", "Evans, GA", "--lat", "33.53371", "--lon", "-82.1307"]), {})
         self.assertEqual((values["LATITUDE"], values["LONGITUDE"]), ("33.5337", "-82.1307"))
         self.assertEqual(values["LOCATION_NAME"], "Evans, GA")
 
     def test_existing_unknown_keys_are_kept(self):
-        values = wr.collect_values(setup_args([]), {"DISCORD_WEBHOOK_URL": WEBHOOK, "MY_NOTE": "hi"})
+        values = wizard.collect_values(setup_args([]), {"DISCORD_WEBHOOK_URL": WEBHOOK, "MY_NOTE": "hi"})
         self.assertEqual(values["MY_NOTE"], "hi")
 
     def test_errors(self):
@@ -85,7 +85,7 @@ class TestCollectValues(unittest.TestCase):
         ]
         for argv, existing in bad:
             with self.assertRaises(config.SetupError, msg=argv):
-                wr.collect_values(setup_args(argv), existing)
+                wizard.collect_values(setup_args(argv), existing)
 
 
 class InstallCase(unittest.TestCase):
@@ -98,7 +98,7 @@ class InstallCase(unittest.TestCase):
         self.log_dir = self.root / "log" / "weather-reporter"
         self.cron_dir.mkdir()
         self.logrotate_dir.mkdir()
-        self.values = wr.collect_values(setup_args(["--webhook", WEBHOOK, "--time", "07:30"]), {})
+        self.values = wizard.collect_values(setup_args(["--webhook", WEBHOOK, "--time", "07:30"]), {})
 
     def repo(self, name):
         repo = self.root / "opt" / name
@@ -181,7 +181,7 @@ class TestInstall(InstallCase):
     def test_existing_config_values_round_trip(self):
         repo = self.repo("weather-reporter")
         self.install(repo, dict(self.values, LOCATION_NAME="Evans, GA", MY_NOTE="kept"))
-        again = wr.collect_values(setup_args([]), config.parse_env_file(repo / "config.env"))
+        again = wizard.collect_values(setup_args([]), config.parse_env_file(repo / "config.env"))
         self.assertEqual(again["LOCATION_NAME"], "Evans, GA")
         self.assertEqual(again["MY_NOTE"], "kept")
 

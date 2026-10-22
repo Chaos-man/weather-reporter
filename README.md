@@ -2,7 +2,7 @@
 
 Daily weather report for Discord. Pulls the National Weather Service forecast, then posts a short, color-coded summary to a Discord webhook every morning, with warnings for rain tomorrow, a freeze tonight, and active NWS alerts.
 
-Runs from cron in a small Proxmox LXC. One Python file, standard library only; no pip packages, no API keys.
+Runs from cron in a small Proxmox LXC. One script to run (`weather_report.py`, with its code in `src/`), standard library only; no pip packages, no API keys.
 
 ## Requirements
 

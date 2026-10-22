@@ -15,7 +15,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import weather_report as wr  # noqa: E402
-from src import config, location, report  # noqa: E402
+from src import config, location, report, wizard  # noqa: E402
 
 WEBHOOK = "https://discord.com/api/webhooks/123456/abc"
 
@@ -77,7 +77,7 @@ class TestLocationInSetup(unittest.TestCase):
     def collect(self, argv, lookup, choose=location.first_place):
         args = wr.build_parser().parse_args(["--yes", "--webhook", WEBHOOK, *argv])
         with quiet():
-            return wr.collect_values(args, {}, lookup=lookup, choose=choose)
+            return wizard.collect_values(args, {}, lookup=lookup, choose=choose)
 
     def test_location_lookup_uses_first_match(self):
         places = location.geocode("Evans", "ua", fetch=FakeFetch(EVANS))
@@ -141,7 +141,7 @@ class TestForecastCheck(unittest.TestCase):
             return {"embeds": [{"title": "ok"}]}
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            wr.check_forecast(self.values, Path("/opt/x/weather_report.py"), build=build)
+            wizard.check_forecast(self.values, Path("/opt/x/weather_report.py"), build=build)
         return out.getvalue()
 
     def test_ok(self):
