@@ -15,7 +15,7 @@ Runs from cron in a small Proxmox LXC. Python standard library only; no pip pack
 | Line | Source |
 |---|---|
 | 🌡️ High / Low | Today's daytime high and tonight's low |
-| 🌧️ Rain | Chance of precipitation today and tonight |
+| 🌧️ Rain | Chance of precipitation today and tonight. Shown only when either is at or above `RAIN_SHOW_THRESHOLD` (default 10%) |
 | ⛅ Conditions | NWS short forecast for today |
 | 🚨 Alerts | Any active NWS alerts for the location |
 | 🥶 Freeze tonight | Tonight's low is at or below `FREEZE_THRESHOLD_F` (default 32°F) |
@@ -89,14 +89,16 @@ setup.sh makes these changes inside the container:
 |---|---|---|
 | Service user | `weather-reporter` | System user created with `useradd --system`: no home directory, `nologin` shell. The cron job runs as this user, not root. |
 | Config permissions | `config.env` | Owned by `root:weather-reporter`, mode `640`, so only root and the service user can read the webhook URL. |
-| Cron job | `/etc/cron.d/weather-reporter` | Runs daily at `RUN_TIME` |
-| Log | `/var/log/weather-reporter/weather-reporter.log` | Owned by the service user |
-| Log rotation | `/etc/logrotate.d/weather-reporter` | Monthly, 6 months kept |
+| Cron job | `/etc/cron.d/<instance>` | Runs daily at `RUN_TIME` |
+| Log | `/var/log/weather-reporter/<instance>.log` | Owned by the service user |
+| Log rotation | `/etc/logrotate.d/<instance>` | Monthly, 6 months kept |
 | Packages | system | Installs `python3`, `cron`, and `ca-certificates` if missing |
 
 It finishes with a dry run against the NWS API to confirm the container can reach it. Nothing is posted to Discord during setup.
 
-setup.sh is safe to re-run. Each run overwrites the cron job and log rotation with the current `config.env` values, and an existing service user is reused.
+`<instance>` is the install's folder name, so a clone in `/opt/weather-reporter` uses `/etc/cron.d/weather-reporter`. See [Multiple locations](#multiple-locations).
+
+setup.sh is safe to re-run. Each run overwrites that install's cron job and log rotation with the current `config.env` values, and an existing service user is reused.
 
 ### 5. Test
 
@@ -114,13 +116,45 @@ All settings live in `config.env`. It is git-ignored, so the webhook URL never r
 | `LOCATION_NAME` | `New York, NY` | Shown in the title |
 | `LATITUDE` / `LONGITUDE` | `40.7128` / `-74.0060` | Forecast point (US locations only; NWS coverage) |
 | `RUN_TIME` | `08:00` | 24-hour `HH:MM`, system time zone |
-| `RAIN_THRESHOLD` | `30` | Percent |
+| `RAIN_THRESHOLD` | `30` | Percent; rain-tomorrow warning |
+| `RAIN_SHOW_THRESHOLD` | `10` | Percent; minimum chance today or tonight to show the 🌧️ line |
 | `FREEZE_THRESHOLD_F` | `32` | °F |
 | `CONTACT` | none | Email or URL for the NWS User-Agent header |
 
 To change the schedule, edit `RUN_TIME` and re-run `./setup.sh`. Threshold and location changes take effect on the next run without re-running setup.
 
 "Today," "tonight," and "tomorrow" are based on the container's local date. If the container runs in UTC and you're in a US time zone, an early `RUN_TIME` can fall on the previous local evening, so set `RUN_TIME` with that in mind or set the container's time zone.
+
+## Multiple locations
+
+Each clone is a separate instance named after its folder, with its own `config.env`, cron job, log, and schedule. To add a second location or webhook:
+
+```bash
+git clone https://github.com/Chaos-man/weather-reporter.git /opt/weather-reporter2
+cd /opt/weather-reporter2
+cp config.env.example config.env
+nano config.env
+./setup.sh
+```
+
+| Folder | Instance name | Cron job |
+|---|---|---|
+| `/opt/weather-reporter` | `weather-reporter` | `/etc/cron.d/weather-reporter` |
+| `/opt/weather-reporter2` | `weather-reporter2` | `/etc/cron.d/weather-reporter2` |
+| `/opt/nyc` | `weather-reporter-nyc` | `/etc/cron.d/weather-reporter-nyc` |
+
+- Folder names that don't start with `weather-reporter` get that prefix, so they can't overwrite unrelated cron jobs.
+- Names are lowercased, and characters other than letters, numbers, `_`, and `-` become `-`.
+- All instances share the `weather-reporter` service user and the `/var/log/weather-reporter/` folder, with one log file each.
+- If two folders produce the same instance name (for example `/opt/weather-reporter` and `/srv/weather-reporter`), setup.sh refuses to overwrite the other install's cron job. Rename the folder and re-run.
+- Each clone is updated separately with `git pull`.
+
+To remove an instance:
+
+```bash
+rm /etc/cron.d/<instance> /etc/logrotate.d/<instance>
+rm -r /opt/<folder>
+```
 
 ## Commands
 
@@ -141,7 +175,7 @@ git pull
 
 ## Troubleshooting
 
-- **Nothing posted:** check `tail /var/log/weather-reporter/weather-reporter.log`.
+- **Nothing posted:** check `tail /var/log/weather-reporter/<instance>.log`.
 - **Ran at the wrong time:** run `date` in the container. Cron uses the system time zone.
 - **`Discord returned HTTP 401/404`:** the webhook was deleted or regenerated. Update `DISCORD_WEBHOOK_URL`.
 - **NWS errors:** the API sometimes returns temporary 5xx errors. The script retries 3 times. Confirm the container has DNS and outbound HTTPS with `--dry-run`.

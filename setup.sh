@@ -6,18 +6,30 @@
 # Usage (as root, from the repo directory):  ./setup.sh
 #
 # RUN_TIME is interpreted in the container's system time zone (check with: date).
+#
+# Multiple instances: each clone is named after its folder, so
+# /opt/weather-reporter and /opt/weather-reporter2 get separate cron jobs,
+# logs, and log rotation. Folders not starting with "weather-reporter" get
+# that prefix (e.g. /opt/nyc -> weather-reporter-nyc).
 
 set -euo pipefail
 
 APP="weather-reporter"
-APP_USER="weather-reporter"
+APP_USER="weather-reporter"   # shared by all instances
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG="$REPO_DIR/config.env"
 SCRIPT="$REPO_DIR/weather_report.py"
-CRON_FILE="/etc/cron.d/$APP"
+
+# Instance name from the folder name. cron.d only runs files named [A-Za-z0-9_-],
+# so anything else becomes "-".
+INSTANCE="$(basename "$REPO_DIR" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9_-' '-' | sed 's/-*$//')"
+[[ "$INSTANCE" == "$APP"* ]] || INSTANCE="$APP-$INSTANCE"
+
+CRON_FILE="/etc/cron.d/$INSTANCE"
 LOG_DIR="/var/log/$APP"
-LOG_FILE="$LOG_DIR/$APP.log"
-LOGROTATE_FILE="/etc/logrotate.d/$APP"
+LOG_FILE="$LOG_DIR/$INSTANCE.log"
+LOGROTATE_FILE="/etc/logrotate.d/$INSTANCE"
+MANAGED_TAG="# Managed by $REPO_DIR/setup.sh"
 
 info() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mWARN:\033[0m %s\n' "$*"; }
@@ -26,6 +38,12 @@ die()  { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 [[ $EUID -eq 0 ]] || die "Run as root (sudo ./setup.sh)."
 [[ -f "$SCRIPT" ]] || die "weather_report.py not found in $REPO_DIR."
 [[ -f "$CONFIG" ]] || die "config.env not found. Run: cp config.env.example config.env && nano config.env"
+
+# Don't take over another clone's cron job (e.g. same folder name in a different parent dir).
+if [[ -f "$CRON_FILE" ]] && ! grep -qxF "$MANAGED_TAG - edit config.env and re-run setup.sh instead." "$CRON_FILE"; then
+  OWNER="$(sed -n 's/^# Managed by \(.*\)\/setup\.sh.*/\1/p' "$CRON_FILE" | head -n1)"
+  die "$CRON_FILE already belongs to ${OWNER:-another install}. Rename this folder and re-run."
+fi
 
 # --- Load and validate config ------------------------------------------------
 # shellcheck disable=SC1090
@@ -71,12 +89,13 @@ fi
 install -d -o "$APP_USER" -g "$APP_USER" -m 755 "$LOG_DIR"
 
 # --- Cron job (overwritten every run) ----------------------------------------
+info "Instance: $INSTANCE"
 info "Writing $CRON_FILE (daily at $(printf '%02d:%02d' "$HOUR" "$MINUTE") $SYS_TZ)"
 cat > "$CRON_FILE" <<EOF
-# Managed by $REPO_DIR/setup.sh - edit config.env and re-run setup.sh instead.
+$MANAGED_TAG - edit config.env and re-run setup.sh instead.
 SHELL=/bin/sh
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-$MINUTE $HOUR * * * $APP_USER /usr/bin/python3 $SCRIPT >> $LOG_FILE 2>&1
+$MINUTE $HOUR * * * $APP_USER /usr/bin/python3 "$SCRIPT" >> "$LOG_FILE" 2>&1
 EOF
 chmod 644 "$CRON_FILE"
 
@@ -113,9 +132,10 @@ fi
 
 echo
 info "Setup complete."
+echo "    Instance : $INSTANCE"
 echo "    Schedule : daily at $(printf '%02d:%02d' "$HOUR" "$MINUTE") (system time: $SYS_TZ)"
 echo "    Cron     : $CRON_FILE"
 echo "    Log      : $LOG_FILE"
 echo
 echo "    Send a test message now:"
-echo "      runuser -u $APP_USER -- python3 $SCRIPT --test"
+echo "      runuser -u $APP_USER -- python3 \"$SCRIPT\" --test"

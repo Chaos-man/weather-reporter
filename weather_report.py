@@ -38,6 +38,7 @@ DEFAULTS = {
     "LATITUDE": "40.7128",
     "LONGITUDE": "-74.0060",
     "RAIN_THRESHOLD": "30",
+    "RAIN_SHOW_THRESHOLD": "10",
     "FREEZE_THRESHOLD_F": "32",
     "CONTACT": "",
 }
@@ -187,10 +188,11 @@ def build_embed(data: dict, cfg: dict, now: datetime, test: bool = False) -> dic
     high = f"{data['high']}°F" if data["high"] is not None else "—"
     low = f"{data['low']}°F" if data["low"] is not None else "—"
 
-    lines = [
-        f"🌡️ **High** {high}  ·  **Low** {low}",
-        f"🌧️ **Rain** {data['rain_today']}% today  ·  {data['rain_tonight']}% tonight",
-    ]
+    lines = [f"🌡️ **High** {high}  ·  **Low** {low}"]
+    # Only show today's rain line when today or tonight reaches RAIN_SHOW_THRESHOLD
+    show_rain = int(cfg["RAIN_SHOW_THRESHOLD"])
+    if max(data["rain_today"], data["rain_tonight"]) >= show_rain:
+        lines.append(f"🌧️ **Rain** {data['rain_today']}% today  ·  {data['rain_tonight']}% tonight")
     if day:
         lines.append(f"{icon} {day['shortForecast']}")
 
