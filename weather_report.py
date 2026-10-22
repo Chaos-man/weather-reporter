@@ -24,6 +24,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -31,6 +32,7 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = SCRIPT_DIR / "config.env"
 NWS_BASE = "https://api.weather.gov"
+GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
 
 # Embed sidebar colors (priority: alert > freeze > rain > clear)
 COLOR_ALERT = 0xE74C3C   # red
@@ -91,19 +93,32 @@ def parse_env_file(path: Path) -> dict:
 # --------------------------------------------------------------------------- #
 # HTTP helpers
 # --------------------------------------------------------------------------- #
-def http_get_json(url: str, user_agent: str, retries: int = 3) -> dict:
-    """GET JSON with simple retry; the NWS API returns intermittent 5xx errors."""
-    headers = {"User-Agent": user_agent, "Accept": "application/geo+json"}
+class HttpError(RuntimeError):
+    """An HTTP 4xx response (not retried)."""
+
+    def __init__(self, url: str, code: int):
+        super().__init__(f"GET {url} returned HTTP {code}")
+        self.code = code
+
+
+def http_get_json(url: str, user_agent: str, retries: int = 3,
+                  accept: str = "application/geo+json") -> dict:
+    """GET JSON. Retries network errors and 5xx (NWS has intermittent 5xx); 4xx fails at once."""
+    headers = {"User-Agent": user_agent, "Accept": accept}
     last_err = None
     for attempt in range(1, retries + 1):
         try:
             req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=20) as resp:
                 return json.load(resp)
+        except urllib.error.HTTPError as err:
+            if 400 <= err.code < 500:
+                raise HttpError(url, err.code) from None
+            last_err = err
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as err:
             last_err = err
-            if attempt < retries:
-                time.sleep(5 * attempt)
+        if attempt < retries:
+            time.sleep(5 * attempt)
     raise RuntimeError(f"GET {url} failed after {retries} attempts: {last_err}")
 
 
@@ -447,7 +462,56 @@ def install(values: dict, repo_dir: Path, script: Path, python: str,
             "logrotate_file": logrotate_file, "hour": hour, "minute": minute}
 
 
-def collect_values(args, existing: dict) -> dict:
+US_STATES = {
+    "Alabama": "AL", "Alaska": "AK", "Arizona": "AZ", "Arkansas": "AR", "California": "CA",
+    "Colorado": "CO", "Connecticut": "CT", "Delaware": "DE", "District of Columbia": "DC",
+    "Florida": "FL", "Georgia": "GA", "Hawaii": "HI", "Idaho": "ID", "Illinois": "IL",
+    "Indiana": "IN", "Iowa": "IA", "Kansas": "KS", "Kentucky": "KY", "Louisiana": "LA",
+    "Maine": "ME", "Maryland": "MD", "Massachusetts": "MA", "Michigan": "MI", "Minnesota": "MN",
+    "Mississippi": "MS", "Missouri": "MO", "Montana": "MT", "Nebraska": "NE", "Nevada": "NV",
+    "New Hampshire": "NH", "New Jersey": "NJ", "New Mexico": "NM", "New York": "NY",
+    "North Carolina": "NC", "North Dakota": "ND", "Ohio": "OH", "Oklahoma": "OK", "Oregon": "OR",
+    "Pennsylvania": "PA", "Rhode Island": "RI", "South Carolina": "SC", "South Dakota": "SD",
+    "Tennessee": "TN", "Texas": "TX", "Utah": "UT", "Vermont": "VT", "Virginia": "VA",
+    "Washington": "WA", "West Virginia": "WV", "Wisconsin": "WI", "Wyoming": "WY",
+    "Puerto Rico": "PR", "Guam": "GU", "U.S. Virgin Islands": "VI", "American Samoa": "AS",
+    "Northern Mariana Islands": "MP",
+}
+
+
+def geocode(query: str, user_agent: str, fetch=None) -> list:
+    """'Evans, GA' -> US matches from Open-Meteo (GeoNames data), best match first."""
+    fetch = fetch or http_get_json
+    params = urllib.parse.urlencode({
+        "name": query.strip(), "count": 10, "language": "en", "countryCode": "US", "format": "json",
+    })
+    data = fetch(f"{GEOCODE_URL}?{params}", user_agent, accept="application/json")
+    places = []
+    for r in data.get("results") or []:
+        if r.get("country_code") != "US" or "latitude" not in r:
+            continue
+        state = r.get("admin1", "")
+        abbr = US_STATES.get(state, state)
+        places.append({
+            "name": f"{r['name']}, {abbr}" if abbr else r["name"],
+            "detail": ", ".join(x for x in (r.get("admin2"), state) if x),
+            "lat": round(float(r["latitude"]), 4),
+            "lon": round(float(r["longitude"]), 4),
+        })
+    return places
+
+
+def describe_place(place: dict) -> str:
+    detail = f" ({place['detail']})" if place["detail"] else ""
+    return f"{place['name']}{detail}  {place['lat']:.4f}, {place['lon']:.4f}"
+
+
+def first_place(places: list) -> dict:
+    """Non-interactive choice: the best (first) match."""
+    return places[0]
+
+
+def collect_values(args, existing: dict, lookup=None, choose=first_place) -> dict:
     """Merge flags > existing config.env > defaults, and validate."""
     values = {**DEFAULTS, **existing}
 
@@ -470,7 +534,19 @@ def collect_values(args, existing: dict) -> dict:
         if args.location:
             values["LOCATION_NAME"] = args.location.strip()
     elif args.location:
-        raise SetupError("city lookup isn't available yet; pass --lat and --lon with --location")
+        lookup = lookup or (lambda q: geocode(q, user_agent_for(values)))
+        try:
+            places = lookup(args.location)
+        except (RuntimeError, OSError) as err:
+            raise SetupError(f"couldn't reach the city lookup service ({err}). "
+                             "Check the network, or use --lat and --lon instead.") from None
+        if not places:
+            raise SetupError(f"no US place found for '{args.location}'. "
+                             "Check the spelling, try 'City, ST', or use --lat and --lon.")
+        place = choose(places)
+        print(f"==> Location: {describe_place(place)}")
+        values["LOCATION_NAME"] = place["name"]
+        values["LATITUDE"], values["LONGITUDE"] = f"{place['lat']:.4f}", f"{place['lon']:.4f}"
 
     if not valid_webhook(values.get("DISCORD_WEBHOOK_URL", "")):
         raise SetupError("a Discord webhook URL is required (--webhook URL, or run setup interactively)")
@@ -521,6 +597,24 @@ def old_user_note(cron_dir: Path = CRON_DIR) -> str:
     return f"The '{APP}' user from older versions is no longer used. Remove it with: userdel {APP}"
 
 
+def check_forecast(values: dict, script: Path, build=None) -> None:
+    """Fetch the forecast once before saving. NWS 404 = location not covered (fatal);
+    network problems only warn, so setup still works while offline."""
+    build = build or build_payload
+    print("==> Checking the forecast from NWS (nothing is posted)...")
+    try:
+        payload = build({**DEFAULTS, **values}, datetime.now().astimezone())
+        print(f"    OK: {payload['embeds'][0]['title']}")
+    except HttpError as err:
+        if err.code == 404:
+            raise SetupError(f"NWS has no forecast for {values['LATITUDE']}, {values['LONGITUDE']} "
+                             "(NWS covers the US and its territories)") from None
+        print(f"WARN: forecast check failed: {err}")
+    except Exception as err:
+        print(f"WARN: forecast check failed: {err}")
+        print(f"      Setup will continue. Re-check later with: {script} --dry-run")
+
+
 def run_setup(args) -> int:
     if os.geteuid() != 0:
         raise SetupError("setup needs root (it writes to /etc/cron.d)")
@@ -528,22 +622,16 @@ def run_setup(args) -> int:
     existing = parse_env_file(config_path)
     values = collect_values(args, existing)
 
-    ensure_packages()
     script = Path(__file__).resolve()
+    check_forecast(values, script)
+
+    ensure_packages()
     result = install(values, SCRIPT_DIR, script, sys.executable)
     ensure_cron_running()
 
     print(f"==> Saved {config_path}")
     print(f"==> Cron job {result['cron_file']}: daily at {values['RUN_TIME']} "
           f"({datetime.now().astimezone().strftime('%Z')} system time)")
-
-    print("==> Checking the forecast from NWS (nothing is posted)...")
-    try:
-        payload = build_payload({**DEFAULTS, **values}, datetime.now().astimezone())
-        print(f"    OK: {payload['embeds'][0]['title']}")
-    except Exception as err:
-        print(f"WARN: forecast check failed: {err}")
-        print(f"      Re-check with: {script} --dry-run")
 
     note = old_user_note()
     if note:
