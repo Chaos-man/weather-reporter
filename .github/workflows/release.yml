@@ -1,7 +1,8 @@
 name: Release
 
-# Push a tag like v1.0 to publish a release:
-#   git tag v1.0 && git push origin v1.0
+# Push an annotated tag to publish a release. The tag message becomes the
+# release notes (--cleanup=verbatim keeps Markdown "#" headings):
+#   git tag -a v1.6 --cleanup=verbatim -F notes.md && git push origin v1.6
 on:
   push:
     tags: ["v*"]
@@ -27,7 +28,22 @@ jobs:
             exit 1
           fi
 
+      - name: Read release notes from the tag message
+        run: |
+          # checkout can leave a lightweight copy of the tag; fetch the real one.
+          git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+          if [ "$(git cat-file -t "$GITHUB_REF_NAME")" != "tag" ]; then
+            echo "::error::$GITHUB_REF_NAME has no release notes. Re-create it as an annotated tag: git tag -a $GITHUB_REF_NAME --cleanup=verbatim -F notes.md"
+            exit 1
+          fi
+          git tag --list --format='%(contents)' "$GITHUB_REF_NAME" > "$RUNNER_TEMP/notes.md"
+          if ! grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md"; then
+            echo "::error::The $GITHUB_REF_NAME tag message is empty"
+            exit 1
+          fi
+
+      # The tag message comes first; --generate-notes appends the Full Changelog link.
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes --verify-tag
+        run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md" --generate-notes --verify-tag

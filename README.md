@@ -217,13 +217,15 @@ git clone --branch v1.0 https://github.com/Chaos-man/weather-reporter.git /opt/w
 
 To publish a new release:
 
-1. Update `__version__` in `src/__init__.py` (for example `"1.1"`) and push that commit to `main`.
-2. Tag the commit and push the tag:
+1. Update `__version__` in `src/__init__.py` (for example `"1.6"`) and push that commit to `main`.
+2. Write the release notes in a file, for example `notes.md`: a one-line summary, what changed, and any upgrade steps. Markdown works.
+3. Create an annotated tag with the notes as its message, and push it:
    ```bash
-   git tag v1.1 && git push origin v1.1
+   git tag -a v1.6 --cleanup=verbatim -F notes.md && git push origin v1.6
    ```
+   `--cleanup=verbatim` stops git from deleting lines that start with `#`, such as Markdown headings.
 
-The Release workflow then runs the tests, checks that the tag matches `__version__`, and creates the GitHub release with notes generated from the commits since the previous release. If the tests fail or the version doesn't match, no release is created.
+The Release workflow then runs the tests, checks that the tag matches `__version__`, and creates the GitHub release. The tag message becomes the release notes, followed by a link to the full changelog. If the tests fail, the version doesn't match, or the tag has no message (a plain `git tag v1.6`), no release is created.
 
 ## Troubleshooting
 
