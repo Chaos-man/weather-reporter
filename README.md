@@ -217,7 +217,7 @@ git clone --branch v1.0 https://github.com/Chaos-man/weather-reporter.git /opt/w
 
 To publish a new release:
 
-1. Update `__version__` in `weather_report.py` (for example `"1.1"`) and push that commit to `main`.
+1. Update `__version__` in `src/__init__.py` (for example `"1.1"`) and push that commit to `main`.
 2. Tag the commit and push the tag:
    ```bash
    git tag v1.1 && git push origin v1.1

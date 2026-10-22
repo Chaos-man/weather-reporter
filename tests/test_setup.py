@@ -12,6 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import weather_report as wr  # noqa: E402
+from src import config  # noqa: E402
 
 WEBHOOK = "https://discord.com/api/webhooks/123456/abc_DEF-ghi"
 
@@ -33,26 +34,26 @@ class TestInstanceName(unittest.TestCase):
             self.assertEqual(wr.instance_name(Path(folder)), expected, folder)
 
     def test_unusable_name(self):
-        with self.assertRaises(wr.SetupError):
+        with self.assertRaises(config.SetupError):
             wr.instance_name(Path("/opt/..."))
 
 
 class TestValidation(unittest.TestCase):
     def test_webhooks(self):
-        self.assertTrue(wr.valid_webhook(WEBHOOK))
-        self.assertTrue(wr.valid_webhook("https://discordapp.com/api/webhooks/1/x"))
-        self.assertTrue(wr.valid_webhook("https://ptb.discord.com/api/webhooks/1/x"))
+        self.assertTrue(config.valid_webhook(WEBHOOK))
+        self.assertTrue(config.valid_webhook("https://discordapp.com/api/webhooks/1/x"))
+        self.assertTrue(config.valid_webhook("https://ptb.discord.com/api/webhooks/1/x"))
         for bad in ("", "https://discord.com/api/webhooks/REPLACE_ME",
                     "http://discord.com/api/webhooks/1/x", "https://evil.com/api/webhooks/1/x"):
-            self.assertFalse(wr.valid_webhook(bad), bad)
+            self.assertFalse(config.valid_webhook(bad), bad)
 
     def test_run_time(self):
-        self.assertEqual(wr.parse_run_time("08:00"), (8, 0))
-        self.assertEqual(wr.parse_run_time("7:05"), (7, 5))
-        self.assertEqual(wr.parse_run_time("23:59"), (23, 59))
+        self.assertEqual(config.parse_run_time("08:00"), (8, 0))
+        self.assertEqual(config.parse_run_time("7:05"), (7, 5))
+        self.assertEqual(config.parse_run_time("23:59"), (23, 59))
         for bad in ("24:00", "8", "8:5", "08:60", "noon", ""):
-            with self.assertRaises(wr.SetupError, msg=bad):
-                wr.parse_run_time(bad)
+            with self.assertRaises(config.SetupError, msg=bad):
+                config.parse_run_time(bad)
 
 
 class TestCollectValues(unittest.TestCase):
@@ -83,7 +84,7 @@ class TestCollectValues(unittest.TestCase):
             (["--webhook", WEBHOOK, "--rain-threshold", "101"], {}),
         ]
         for argv, existing in bad:
-            with self.assertRaises(wr.SetupError, msg=argv):
+            with self.assertRaises(config.SetupError, msg=argv):
                 wr.collect_values(setup_args(argv), existing)
 
 
@@ -114,12 +115,12 @@ class TestInstall(InstallCase):
         repo = self.repo("weather-reporter")
         result = self.install(repo)
 
-        config = repo / "config.env"
-        self.assertEqual(stat.S_IMODE(config.stat().st_mode), 0o600)
-        parsed = wr.parse_env_file(config)
+        config_file = repo / "config.env"
+        self.assertEqual(stat.S_IMODE(config_file.stat().st_mode), 0o600)
+        parsed = config.parse_env_file(config_file)
         self.assertEqual(parsed["DISCORD_WEBHOOK_URL"], WEBHOOK)
         self.assertEqual(parsed["RUN_TIME"], "07:30")
-        for line in config.read_text().splitlines():  # comments only on their own lines
+        for line in config_file.read_text().splitlines():  # comments only on their own lines
             self.assertFalse("=" in line and "#" in line.split("=", 1)[1], line)
 
         cron = (self.cron_dir / "weather-reporter").read_text()
@@ -146,13 +147,13 @@ class TestInstall(InstallCase):
         self.install(self.repo("weather-reporter"))
         other = self.root / "srv" / "weather-reporter"
         other.mkdir(parents=True)
-        with self.assertRaises(wr.SetupError) as ctx:
+        with self.assertRaises(config.SetupError) as ctx:
             self.install(other)
         self.assertIn(str(self.root / "opt" / "weather-reporter"), str(ctx.exception))
 
     def test_refuses_unrelated_cron_file(self):
         (self.cron_dir / "weather-reporter").write_text("0 0 * * * root something-else\n")
-        with self.assertRaises(wr.SetupError):
+        with self.assertRaises(config.SetupError):
             self.install(self.repo("weather-reporter"))
 
     def test_upgrades_cron_job_from_old_setup_sh(self):
@@ -174,13 +175,13 @@ class TestInstall(InstallCase):
         self.assertIn(f'"{repo}/weather_report.py" --run', cron)
 
     def test_rejects_percent_in_path(self):
-        with self.assertRaises(wr.SetupError):
+        with self.assertRaises(config.SetupError):
             self.install(self.repo("weather%reporter"))
 
     def test_existing_config_values_round_trip(self):
         repo = self.repo("weather-reporter")
         self.install(repo, dict(self.values, LOCATION_NAME="Evans, GA", MY_NOTE="kept"))
-        again = wr.collect_values(setup_args([]), wr.parse_env_file(repo / "config.env"))
+        again = wr.collect_values(setup_args([]), config.parse_env_file(repo / "config.env"))
         self.assertEqual(again["LOCATION_NAME"], "Evans, GA")
         self.assertEqual(again["MY_NOTE"], "kept")
 

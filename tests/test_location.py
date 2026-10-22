@@ -15,6 +15,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import weather_report as wr  # noqa: E402
+from src import config, report  # noqa: E402
 
 WEBHOOK = "https://discord.com/api/webhooks/123456/abc"
 
@@ -98,12 +99,12 @@ class TestLocationInSetup(unittest.TestCase):
     def test_lookup_unreachable_is_a_setup_error(self):
         def down(q):
             raise RuntimeError("network down")
-        with self.assertRaises(wr.SetupError) as ctx:
+        with self.assertRaises(config.SetupError) as ctx:
             self.collect(["--location", "Evans, GA"], lookup=down)
         self.assertIn("--lat and --lon", str(ctx.exception))
 
     def test_no_match_is_an_error(self):
-        with self.assertRaises(wr.SetupError):
+        with self.assertRaises(config.SetupError):
             self.collect(["--location", "Nowhere, ZZ"], lookup=lambda q: [])
 
 
@@ -114,8 +115,8 @@ class TestHttpRetries(unittest.TestCase):
     def test_4xx_fails_without_retry(self):
         with mock.patch("urllib.request.urlopen", side_effect=self.http_error(404)) as urlopen, \
              mock.patch("time.sleep") as sleep:
-            with self.assertRaises(wr.HttpError) as ctx:
-                wr.http_get_json("https://x", "ua")
+            with self.assertRaises(report.HttpError) as ctx:
+                report.http_get_json("https://x", "ua")
         self.assertEqual(ctx.exception.code, 404)
         self.assertEqual(urlopen.call_count, 1)
         sleep.assert_not_called()
@@ -125,9 +126,9 @@ class TestHttpRetries(unittest.TestCase):
         with mock.patch("urllib.request.urlopen", side_effect=errors) as urlopen, \
              mock.patch("time.sleep"):
             with self.assertRaises(RuntimeError) as ctx:
-                wr.http_get_json("https://x", "ua")
+                report.http_get_json("https://x", "ua")
         self.assertEqual(urlopen.call_count, 3)
-        self.assertNotIsInstance(ctx.exception, wr.HttpError)
+        self.assertNotIsInstance(ctx.exception, report.HttpError)
 
 
 class TestForecastCheck(unittest.TestCase):
@@ -147,8 +148,8 @@ class TestForecastCheck(unittest.TestCase):
         self.assertIn("OK: ok", self.check())
 
     def test_outside_nws_coverage_is_fatal(self):
-        with self.assertRaises(wr.SetupError) as ctx:
-            self.check(wr.HttpError("https://api.weather.gov/points/51.5,-0.12", 404))
+        with self.assertRaises(config.SetupError) as ctx:
+            self.check(report.HttpError("https://api.weather.gov/points/51.5,-0.12", 404))
         self.assertIn("NWS has no forecast", str(ctx.exception))
 
     def test_network_problem_only_warns(self):
