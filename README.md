@@ -2,12 +2,14 @@
 
 Daily weather report for Discord. Pulls the National Weather Service forecast, then posts a short, color-coded summary to a Discord webhook every morning, with warnings for rain tomorrow, a freeze tonight, and active NWS alerts.
 
-Runs from cron in a small Proxmox LXC. Python standard library only; no pip packages, no API keys.
+Runs from cron in a small Proxmox LXC. One Python file, standard library only; no pip packages, no API keys.
 
 ## Requirements
 
-- Python 3.9 or newer, standard library only (Debian 12 ships 3.11). `setup.sh` installs `python3` if it's missing.
-- Outbound HTTPS to `api.weather.gov` and `discord.com`
+- Debian or Ubuntu (setup uses `apt-get` to install `cron` if it's missing)
+- Python 3.9 or newer (Debian 12 ships 3.11)
+- Root access. It's meant for a dedicated container; see [Why it runs as root](#why-it-runs-as-root)
+- Outbound HTTPS to `api.weather.gov` and `discord.com`, plus `geocoding-api.open-meteo.com` during setup
 - A US location (the NWS API covers the US and its territories)
 
 ## What the report shows
@@ -30,7 +32,7 @@ The embed's sidebar color reflects the most important condition:
 | 🟡 Yellow | Rain tomorrow |
 | 🟢 Green | All clear |
 
-## Setup
+## Install
 
 ### 1. Create the LXC (on the Proxmox host)
 
@@ -56,74 +58,105 @@ pct create 120 local:vztmpl/debian-12-standard_<version>_amd64.tar.zst \
 pct enter 120
 ```
 
-### 2. Clone the repo (inside the LXC, as root)
+The report runs on the container's system clock. New LXCs often default to UTC. To use local time, set the time zone before setup, for example `timedatectl set-timezone America/New_York`, and check it with `date`.
+
+### 2. Clone (inside the LXC, as root)
 
 ```bash
-apt-get update && apt-get install -y git
+apt-get update && apt-get install -y git python3
 git clone https://github.com/Chaos-man/weather-reporter.git /opt/weather-reporter
 cd /opt/weather-reporter
 ```
 
-Clone to `/opt` (or another world-readable path), not `/root`. The job runs as an unprivileged user that needs to read the script.
-
-### 3. Configure
+### 3. Run setup
 
 ```bash
-cp config.env.example config.env
-nano config.env
+./weather_report.py
 ```
 
-At minimum, set `DISCORD_WEBHOOK_URL`, your location (`LOCATION_NAME`, `LATITUDE`, `LONGITUDE`), and `CONTACT`.
+Setup asks four questions. Press Enter to keep the value shown in brackets:
 
-`RUN_TIME` uses the container's system time zone. Check it with `date`. New LXCs often default to UTC, so `08:00` means 08:00 UTC unless you change the container's time zone (for example, `timedatectl set-timezone America/New_York`).
+| Question | Notes |
+|---|---|
+| Discord webhook URL | Channel Settings > Integrations > Webhooks |
+| Location (City, ST) | For example `Evans, GA`. Setup looks up the coordinates and asks you to confirm, or to pick from a list if there are several matches |
+| Daily run time | 24-hour `HH:MM`, in the container's time zone |
+| Contact email | Optional. Sent to NWS in the User-Agent header, which they ask for |
 
-### 4. Run the setup script
+It then shows a summary and asks before saving. After saving, it checks the forecast from NWS and offers to send a test message.
 
-```bash
-./setup.sh
-```
+Re-run `./weather_report.py` at any time to change settings. The current values are the defaults, so you only change what you need.
 
-setup.sh makes these changes inside the container:
+### What setup changes
 
 | What | Where | Details |
 |---|---|---|
-| Service user | `weather-reporter` | System user created with `useradd --system`: no home directory, `nologin` shell. The cron job runs as this user, not root. |
-| Config permissions | `config.env` | Owned by `root:weather-reporter`, mode `640`, so only root and the service user can read the webhook URL. |
-| Cron job | `/etc/cron.d/<instance>` | Runs daily at `RUN_TIME` |
-| Log | `/var/log/weather-reporter/<instance>.log` | Owned by the service user |
+| Config | `config.env` in the install folder | Owned by root, mode `600`. Git-ignored, so the webhook never reaches the repo |
+| Cron job | `/etc/cron.d/<instance>` | Runs `weather_report.py --run` as root daily at the run time |
+| Log | `/var/log/weather-reporter/<instance>.log` | Output of each cron run |
 | Log rotation | `/etc/logrotate.d/<instance>` | Monthly, 6 months kept |
-| Packages | system | Installs `python3`, `cron`, and `ca-certificates` if missing |
+| Packages | system | Installs `cron` and `ca-certificates` only if missing |
 
-It finishes with a dry run against the NWS API to confirm the container can reach it. Nothing is posted to Discord during setup.
+`<instance>` is the install's folder name, so `/opt/weather-reporter` uses `/etc/cron.d/weather-reporter`. See [Multiple locations](#multiple-locations).
 
-`<instance>` is the install's folder name, so a clone in `/opt/weather-reporter` uses `/etc/cron.d/weather-reporter`. See [Multiple locations](#multiple-locations).
+## Non-interactive setup
 
-setup.sh is safe to re-run. Each run overwrites that install's cron job and log rotation with the current `config.env` values, and an existing service user is reused.
-
-### 5. Test
+Every question has a flag, and anything given as a flag isn't asked. Add `--yes` to skip all questions. Missing values then come from the existing `config.env`, then from the defaults. This is useful for scripts and Ansible.
 
 ```bash
-runuser -u weather-reporter -- python3 /opt/weather-reporter/weather_report.py --test
+./weather_report.py --yes --webhook "https://discord.com/api/webhooks/..." \
+  --location "Evans, GA" --time 07:30 --contact you@example.com
 ```
+
+| Flag | Sets |
+|---|---|
+| `--webhook URL` | Discord webhook |
+| `--location "CITY, ST"` | Location, looked up automatically. With `--yes`, the best match is used |
+| `--lat N --lon N` | Coordinates; skips the lookup. `--location` then only sets the display name |
+| `--time HH:MM` | Daily run time |
+| `--contact EMAIL` | NWS contact |
+| `--rain-threshold PCT` | Rain-tomorrow warning (default 30) |
+| `--rain-show-threshold PCT` | Minimum chance to show the 🌧️ line (default 10) |
+| `--freeze-threshold F` | Freeze warning (default 32) |
+
+The thresholds aren't asked during interactive setup. Set them with these flags, or by editing `config.env`.
+
+> **Note:** a webhook passed with `--webhook` is saved in your shell history and is briefly visible in the process list. Interactive setup avoids both.
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `./weather_report.py` | Set up or reconfigure (interactive) |
+| `./weather_report.py --run` | Fetch the forecast and post to Discord (what cron runs) |
+| `./weather_report.py --dry-run` | Fetch the forecast and print the Discord payload; nothing is posted |
+| `./weather_report.py --test` | Post to Discord with `[TEST]` in the title |
+| `./weather_report.py --help` | All options |
 
 ## Configuration
 
-All settings live in `config.env`. It is git-ignored, so the webhook URL never reaches the repo.
+Setup writes `config.env`, and you can also edit it by hand. Threshold and location changes take effect on the next run. After changing `RUN_TIME`, re-run setup so the cron job is updated.
 
 | Key | Default | Notes |
 |---|---|---|
 | `DISCORD_WEBHOOK_URL` | none | Required |
 | `LOCATION_NAME` | `New York, NY` | Shown in the title |
-| `LATITUDE` / `LONGITUDE` | `40.7128` / `-74.0060` | Forecast point (US locations only; NWS coverage) |
+| `LATITUDE` / `LONGITUDE` | `40.7128` / `-74.0060` | Forecast point |
 | `RUN_TIME` | `08:00` | 24-hour `HH:MM`, system time zone |
 | `RAIN_THRESHOLD` | `30` | Percent; rain-tomorrow warning |
 | `RAIN_SHOW_THRESHOLD` | `10` | Percent; minimum chance today or tonight to show the 🌧️ line |
 | `FREEZE_THRESHOLD_F` | `32` | °F |
 | `CONTACT` | none | Email or URL for the NWS User-Agent header |
 
-To change the schedule, edit `RUN_TIME` and re-run `./setup.sh`. Threshold and location changes take effect on the next run without re-running setup.
+Keep comments on their own lines. A comment after a value (`RAIN_THRESHOLD="30"  # note`) becomes part of the value.
 
-"Today," "tonight," and "tomorrow" are based on the container's local date. If the container runs in UTC and you're in a US time zone, an early `RUN_TIME` can fall on the previous local evening, so set `RUN_TIME` with that in mind or set the container's time zone.
+"Today," "tonight," and "tomorrow" follow the container's local date. If the container runs in UTC and you're in a US time zone, an early run time can fall on the previous local evening.
+
+## Why it runs as root
+
+The cron job runs as root, and setup needs root to write `/etc/cron.d`. The script only makes outbound HTTPS requests and writes its log. Nothing listens on a port. In a dedicated, unprivileged LXC, container root is mapped to an unprivileged user on the Proxmox host, so a separate service account adds little.
+
+If you install it on a shared host instead, keep in mind that the code in the install folder runs as root daily. Only root should be able to write to that folder, which is the default under `/opt`.
 
 ## Multiple locations
 
@@ -132,9 +165,7 @@ Each clone is a separate instance named after its folder, with its own `config.e
 ```bash
 git clone https://github.com/Chaos-man/weather-reporter.git /opt/weather-reporter2
 cd /opt/weather-reporter2
-cp config.env.example config.env
-nano config.env
-./setup.sh
+./weather_report.py
 ```
 
 | Folder | Instance name | Cron job |
@@ -145,8 +176,8 @@ nano config.env
 
 - Folder names that don't start with `weather-reporter` get that prefix, so they can't overwrite unrelated cron jobs.
 - Names are lowercased, and characters other than letters, numbers, `_`, and `-` become `-`.
-- All instances share the `weather-reporter` service user and the `/var/log/weather-reporter/` folder, with one log file each.
-- If two folders produce the same instance name (for example `/opt/weather-reporter` and `/srv/weather-reporter`), setup.sh refuses to overwrite the other install's cron job. Rename the folder and re-run.
+- All instances log to `/var/log/weather-reporter/`, one file each.
+- If two folders produce the same instance name (for example `/opt/weather-reporter` and `/srv/weather-reporter`), setup refuses to overwrite the other install's cron job. Rename the folder and re-run.
 - Each clone is updated separately with `git pull`.
 
 To remove an instance:
@@ -156,33 +187,38 @@ rm /etc/cron.d/<instance> /etc/logrotate.d/<instance>
 rm -r /opt/<folder>
 ```
 
-## Commands
-
-| Command | What it does |
-|---|---|
-| `python3 weather_report.py` | Fetch the forecast and post to Discord (what cron runs) |
-| `python3 weather_report.py --dry-run` | Fetch the forecast and print the Discord payload; nothing is posted |
-| `python3 weather_report.py --test` | Post to Discord with `[TEST]` in the title |
-| `./setup.sh` | Install or reconfigure. Safe to re-run |
-
 ## Updating
 
 ```bash
 cd /opt/weather-reporter
 git pull
-./setup.sh
+./weather_report.py
 ```
+
+Re-running setup after an update makes sure the cron job matches the new version. Press Enter at each question to keep your settings.
+
+### Upgrading from a version with `setup.sh`
+
+Older versions used `setup.sh` and a `weather-reporter` service user. After `git pull`, run `./weather_report.py` once in each install folder. Setup:
+- keeps your existing `config.env` values as the defaults
+- rewrites the cron job to run as root with `--run`
+- makes `config.env` root-only
+
+Until you do, the old cron job fails with a "use --run" error instead of posting. Once no install uses the old user anymore, setup prints the command to remove it (`userdel weather-reporter`).
 
 ## Troubleshooting
 
 - **Nothing posted:** check `tail /var/log/weather-reporter/<instance>.log`.
 - **Ran at the wrong time:** run `date` in the container. Cron uses the system time zone.
-- **`Discord returned HTTP 401/404`:** the webhook was deleted or regenerated. Update `DISCORD_WEBHOOK_URL`.
+- **`Discord returned HTTP 401/404`:** the webhook was deleted or regenerated. Re-run setup and enter the new one.
+- **"NWS has no forecast for ..."** during setup: the location is outside NWS coverage (US and territories only).
 - **NWS errors:** the API sometimes returns temporary 5xx errors. The script retries 3 times. Confirm the container has DNS and outbound HTTPS with `--dry-run`.
+- **City lookup fails:** check that `geocoding-api.open-meteo.com` is reachable, or pass `--lat` and `--lon`.
 
-## Data source
+## Credits
 
-[National Weather Service API](https://www.weather.gov/documentation/services-web-api), free with no key. NWS asks clients to send a User-Agent with contact info, which is why `CONTACT` exists.
+- Weather forecasts and alerts: [National Weather Service API](https://www.weather.gov/documentation/services-web-api) (NOAA). Free, no key required.
+- Location search during setup: [Open-Meteo Geocoding API](https://open-meteo.com/en/docs/geocoding-api), using location data from [GeoNames](https://www.geonames.org/).
 
 ## License
 

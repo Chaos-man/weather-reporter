@@ -57,9 +57,9 @@ class TestConfig(unittest.TestCase):
         self.addCleanup(Path(tmp.name).unlink)
         return Path(tmp.name)
 
-    def test_example_config_parses_cleanly(self):
-        # Regression: inline comments in the example once broke int() parsing.
-        cfg = wr.load_config(REPO_DIR / "config.env.example")
+    def test_config_written_by_setup_parses_cleanly(self):
+        # Regression: inline comments once broke int() parsing of thresholds.
+        cfg = wr.load_config(self.write(wr.render_config(dict(wr.DEFAULTS))))
         for key in ("RAIN_THRESHOLD", "RAIN_SHOW_THRESHOLD", "FREEZE_THRESHOLD_F"):
             int(cfg[key])
         float(cfg["LATITUDE"])

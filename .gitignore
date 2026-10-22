@@ -1,5 +1,6 @@
 # Secrets - contains the Discord webhook URL
 config.env
+.*.tmp
 
 # Python
 __pycache__/
