@@ -7,7 +7,8 @@ active alerts from the National Weather Service API, and posts a short,
 color-coded Discord embed.
 
 Usage:
-  weather_report.py              Fetch the forecast and post to Discord
+  weather_report.py              Set up or reconfigure this install (interactive)
+  weather_report.py --run        Fetch the forecast and post to Discord (used by cron)
   weather_report.py --dry-run    Fetch the forecast and print the payload; do not post
   weather_report.py --test       Post to Discord with a [TEST] tag in the title
 
@@ -236,15 +237,9 @@ def build_embed(data: dict, cfg: dict, now: datetime, test: bool = False) -> dic
 
 
 # --------------------------------------------------------------------------- #
-# Main
+# Report (--run / --dry-run / --test)
 # --------------------------------------------------------------------------- #
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Post the daily NWS forecast to Discord.")
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument("--dry-run", action="store_true", help="print the payload, do not post")
-    group.add_argument("--test", action="store_true", help="post with a [TEST] tag in the title")
-    args = parser.parse_args()
-
+def run_report(mode: str) -> int:
     cfg = load_config(CONFIG_PATH)
     # Use the system's local time zone (whatever the container is set to).
     now = datetime.now().astimezone()
@@ -260,9 +255,9 @@ def main() -> int:
     alerts = http_get_json(f"{NWS_BASE}/alerts/active?point={lat},{lon}", user_agent)
 
     data = analyze(forecast["properties"]["periods"], alerts.get("features", []), cfg, now)
-    payload = {"embeds": [build_embed(data, cfg, now, test=args.test)]}
+    payload = {"embeds": [build_embed(data, cfg, now, test=(mode == "test"))]}
 
-    if args.dry_run:
+    if mode == "dry-run":
         print(json.dumps(payload, indent=2, ensure_ascii=False))
         return 0
 
@@ -273,6 +268,70 @@ def main() -> int:
     post_discord(webhook, payload, user_agent)
     print(f"{now.isoformat()} posted report (color={payload['embeds'][0]['color']:#08x})")
     return 0
+
+
+# --------------------------------------------------------------------------- #
+# Setup (default when no mode flag is given)
+# --------------------------------------------------------------------------- #
+def run_setup(args) -> int:
+    print("Setup is not implemented yet.")
+    return 0
+
+
+# --------------------------------------------------------------------------- #
+# Command line
+# --------------------------------------------------------------------------- #
+class UsageError(Exception):
+    """Bad combination of command-line options."""
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Daily NWS weather report for Discord. "
+                    "With no mode flag, runs setup for this install.",
+    )
+    modes = parser.add_argument_group("modes (pick one; default is setup)")
+    exclusive = modes.add_mutually_exclusive_group()
+    exclusive.add_argument("--run", action="store_true", help="fetch the forecast and post to Discord (used by cron)")
+    exclusive.add_argument("--dry-run", action="store_true", help="fetch the forecast and print the payload; do not post")
+    exclusive.add_argument("--test", action="store_true", help="post with a [TEST] tag in the title")
+
+    setup = parser.add_argument_group("setup options")
+    setup.add_argument("--yes", "-y", action="store_true",
+                       help="don't ask questions; use flags, then existing config, then defaults")
+    return parser
+
+
+SETUP_OPTIONS = ("yes",)
+
+
+def select_mode(args, stdin_is_tty: bool) -> str:
+    """Decide what to do: 'run', 'dry-run', 'test', or 'setup'."""
+    for mode in ("run", "dry_run", "test"):
+        if getattr(args, mode):
+            used = [f"--{o.replace('_', '-')}" for o in SETUP_OPTIONS if getattr(args, o)]
+            if used:
+                raise UsageError(f"{', '.join(used)} can only be used with setup, not --{mode.replace('_', '-')}")
+            return mode.replace("_", "-")
+    if not args.yes and not stdin_is_tty:
+        raise UsageError(
+            "setup needs a terminal to ask questions. "
+            "Use --yes for non-interactive setup, or --run to post the report "
+            "(cron jobs created by older versions need re-running setup)."
+        )
+    return "setup"
+
+
+def main(argv=None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        mode = select_mode(args, sys.stdin.isatty())
+    except UsageError as err:
+        parser.error(str(err))
+    if mode == "setup":
+        return run_setup(args)
+    return run_report(mode)
 
 
 if __name__ == "__main__":
