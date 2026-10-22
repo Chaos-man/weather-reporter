@@ -18,161 +18,20 @@ Standard library only - no pip packages required.
 import argparse
 import os
 import re
-import shutil
-import subprocess
 import sys
-import urllib.error
-import urllib.parse
-import urllib.request
 from datetime import datetime
 from pathlib import Path
 
 from src import __version__
-from src.config import (APP, CRON_DIR, DEFAULTS, LOG_DIR, LOGROTATE_DIR, SCRIPT, SCRIPT_DIR,
-                        SetupError, parse_env_file, parse_int, parse_run_time, render_config,
-                        valid_webhook)
-from src.report import HttpError, build_payload, http_get_json, run_report, user_agent_for
-
-GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
+from src.config import DEFAULTS, SCRIPT, SCRIPT_DIR, SetupError, parse_env_file, parse_int, parse_run_time, valid_webhook
+from src.install import ensure_cron_running, ensure_packages, install, old_user_note
+from src.location import describe_place, first_place, geocode
+from src.report import HttpError, build_payload, run_report, user_agent_for
 
 
 # --------------------------------------------------------------------------- #
 # Setup (default when no mode flag is given)
 # --------------------------------------------------------------------------- #
-def instance_name(repo_dir: Path) -> str:
-    """Folder name -> cron-safe instance name (cron.d only runs [A-Za-z0-9_-] files)."""
-    name = re.sub(r"[^a-z0-9_-]", "-", repo_dir.name.lower()).strip("-")
-    if not name:
-        raise SetupError(f"can't build an instance name from folder '{repo_dir}'")
-    return name if name.startswith(APP) else f"{APP}-{name}"
-
-def write_file(path: Path, content: str, mode: int) -> None:
-    """Write via a temp file + rename so a failed write never leaves half a file."""
-    tmp = path.with_name(f".{path.name}.tmp")
-    tmp.write_text(content)
-    os.chmod(tmp, mode)
-    if os.geteuid() == 0:
-        os.chown(tmp, 0, 0)
-    os.replace(tmp, path)
-
-
-MANAGED_RE = re.compile(r"^# Managed by (.+)/(?:setup\.sh|weather_report\.py) - ", re.MULTILINE)
-
-
-def cron_owner(cron_file: Path):
-    """Folder that wrote this cron file, or None if it isn't one of ours."""
-    match = MANAGED_RE.search(cron_file.read_text()) if cron_file.exists() else None
-    return Path(match.group(1)) if match else None
-
-
-def render_cron(repo_dir: Path, script: Path, python: str, hour: int, minute: int, log_file: Path) -> str:
-    return (
-        f"# Managed by {repo_dir}/weather_report.py - re-run setup to change this file.\n"
-        "SHELL=/bin/sh\n"
-        "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n"
-        f'{minute} {hour} * * * root "{python}" "{script}" --run >> "{log_file}" 2>&1\n'
-    )
-
-
-def render_logrotate(log_file: Path) -> str:
-    return (
-        f'"{log_file}" {{\n'
-        "    monthly\n"
-        "    rotate 6\n"
-        "    compress\n"
-        "    missingok\n"
-        "    notifempty\n"
-        "}\n"
-    )
-
-
-def install(values: dict, repo_dir: Path, script: Path, python: str,
-            cron_dir: Path = CRON_DIR, logrotate_dir: Path = LOGROTATE_DIR,
-            log_dir: Path = LOG_DIR) -> dict:
-    """Write config.env, the cron job, and log rotation for this install.
-
-    Only touches files; package and service handling is separate so this can be
-    tested against temporary folders.
-    """
-    instance = instance_name(repo_dir)
-    cron_file = cron_dir / instance
-    log_file = log_dir / f"{instance}.log"
-    for path in (repo_dir, script, log_file):
-        if "%" in str(path) or "\n" in str(path) or '"' in str(path):
-            raise SetupError(f"path '{path}' contains a character cron can't handle (%, quote, or newline)")
-
-    owner = cron_owner(cron_file)
-    if cron_file.exists() and owner != repo_dir:
-        raise SetupError(
-            f"{cron_file} already belongs to {owner or 'something else'}. "
-            "Rename this folder and re-run setup."
-        )
-
-    hour, minute = parse_run_time(values["RUN_TIME"])
-    write_file(repo_dir / "config.env", render_config(values), 0o600)
-
-    log_dir.mkdir(parents=True, exist_ok=True)
-    os.chmod(log_dir, 0o755)
-    if os.geteuid() == 0:
-        os.chown(log_dir, 0, 0)  # older versions made this owned by a service user
-    write_file(cron_file, render_cron(repo_dir, script, python, hour, minute, log_file), 0o644)
-
-    logrotate_file = None
-    if logrotate_dir.is_dir():
-        logrotate_file = logrotate_dir / instance
-        write_file(logrotate_file, render_logrotate(log_file), 0o644)
-
-    return {"instance": instance, "cron_file": cron_file, "log_file": log_file,
-            "logrotate_file": logrotate_file, "hour": hour, "minute": minute}
-
-
-US_STATES = {
-    "Alabama": "AL", "Alaska": "AK", "Arizona": "AZ", "Arkansas": "AR", "California": "CA",
-    "Colorado": "CO", "Connecticut": "CT", "Delaware": "DE", "District of Columbia": "DC",
-    "Florida": "FL", "Georgia": "GA", "Hawaii": "HI", "Idaho": "ID", "Illinois": "IL",
-    "Indiana": "IN", "Iowa": "IA", "Kansas": "KS", "Kentucky": "KY", "Louisiana": "LA",
-    "Maine": "ME", "Maryland": "MD", "Massachusetts": "MA", "Michigan": "MI", "Minnesota": "MN",
-    "Mississippi": "MS", "Missouri": "MO", "Montana": "MT", "Nebraska": "NE", "Nevada": "NV",
-    "New Hampshire": "NH", "New Jersey": "NJ", "New Mexico": "NM", "New York": "NY",
-    "North Carolina": "NC", "North Dakota": "ND", "Ohio": "OH", "Oklahoma": "OK", "Oregon": "OR",
-    "Pennsylvania": "PA", "Rhode Island": "RI", "South Carolina": "SC", "South Dakota": "SD",
-    "Tennessee": "TN", "Texas": "TX", "Utah": "UT", "Vermont": "VT", "Virginia": "VA",
-    "Washington": "WA", "West Virginia": "WV", "Wisconsin": "WI", "Wyoming": "WY",
-    "Puerto Rico": "PR", "Guam": "GU", "U.S. Virgin Islands": "VI", "American Samoa": "AS",
-    "Northern Mariana Islands": "MP",
-}
-
-
-def geocode(query: str, user_agent: str, fetch=None) -> list:
-    """'Evans, GA' -> US matches from Open-Meteo (GeoNames data), best match first."""
-    fetch = fetch or http_get_json
-    params = urllib.parse.urlencode({
-        "name": query.strip(), "count": 10, "language": "en", "countryCode": "US", "format": "json",
-    })
-    data = fetch(f"{GEOCODE_URL}?{params}", user_agent, accept="application/json")
-    places = []
-    for r in data.get("results") or []:
-        if r.get("country_code") != "US" or "latitude" not in r:
-            continue
-        state = r.get("admin1", "")
-        abbr = US_STATES.get(state, state)
-        places.append({
-            "name": f"{r['name']}, {abbr}" if abbr else r["name"],
-            "detail": ", ".join(x for x in (r.get("admin2"), state) if x),
-            "lat": round(float(r["latitude"]), 4),
-            "lon": round(float(r["longitude"]), 4),
-        })
-    return places
-
-
-def describe_place(place: dict) -> str:
-    detail = f" ({place['detail']})" if place["detail"] else ""
-    return f"{place['name']}{detail}  {place['lat']:.4f}, {place['lon']:.4f}"
-
-
-def first_place(places: list) -> dict:
-    """Non-interactive choice: the best (first) match."""
-    return places[0]
 
 
 def collect_values(args, existing: dict, lookup=None, choose=first_place) -> dict:
@@ -219,46 +78,6 @@ def collect_values(args, existing: dict, lookup=None, choose=first_place) -> dic
     parse_int(values["RAIN_SHOW_THRESHOLD"], "rain show threshold", 0, 100)
     parse_int(values["FREEZE_THRESHOLD_F"], "freeze threshold", -60, 80)
     return values
-
-
-def run_cmd(cmd: list) -> None:
-    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, env={**os.environ, "DEBIAN_FRONTEND": "noninteractive"})
-
-
-def ensure_packages() -> None:
-    """Install cron and CA certificates if they're missing (Debian/Ubuntu)."""
-    missing = []
-    if not shutil.which("cron"):
-        missing.append("cron")
-    if not Path("/etc/ssl/certs/ca-certificates.crt").exists():
-        missing.append("ca-certificates")
-    if not missing:
-        return
-    if not shutil.which("apt-get"):
-        raise SetupError(f"please install {' and '.join(missing)}, then re-run setup")
-    print(f"==> Installing {' '.join(missing)}")
-    run_cmd(["apt-get", "update", "-qq"])
-    run_cmd(["apt-get", "install", "-y", "-qq", *missing])
-
-
-def ensure_cron_running() -> None:
-    if Path("/run/systemd/system").is_dir() and shutil.which("systemctl"):
-        run_cmd(["systemctl", "enable", "--now", "cron"])
-    elif shutil.which("service"):
-        run_cmd(["service", "cron", "start"])
-
-
-def old_user_note(cron_dir: Path = CRON_DIR) -> str:
-    """Older versions ran as a 'weather-reporter' user. Suggest removing it once unused."""
-    try:
-        import pwd
-        pwd.getpwnam(APP)
-    except (ImportError, KeyError):
-        return ""
-    for cron_file in cron_dir.glob(f"{APP}*"):
-        if re.search(rf"^\S+ \S+ \S+ \S+ \S+ {APP} ", cron_file.read_text(), re.MULTILINE):
-            return ""  # another install still uses it
-    return f"The '{APP}' user from older versions is no longer used. Remove it with: userdel {APP}"
 
 
 def check_forecast(values: dict, script: Path, build=None) -> None:

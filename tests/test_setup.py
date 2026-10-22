@@ -12,7 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import weather_report as wr  # noqa: E402
-from src import config  # noqa: E402
+from src import config, install  # noqa: E402
 
 WEBHOOK = "https://discord.com/api/webhooks/123456/abc_DEF-ghi"
 
@@ -31,11 +31,11 @@ class TestInstanceName(unittest.TestCase):
             "/opt/Weather-Reporter.Test": "weather-reporter-test",
         }
         for folder, expected in cases.items():
-            self.assertEqual(wr.instance_name(Path(folder)), expected, folder)
+            self.assertEqual(install.instance_name(Path(folder)), expected, folder)
 
     def test_unusable_name(self):
         with self.assertRaises(config.SetupError):
-            wr.instance_name(Path("/opt/..."))
+            install.instance_name(Path("/opt/..."))
 
 
 class TestValidation(unittest.TestCase):
@@ -106,7 +106,7 @@ class InstallCase(unittest.TestCase):
         return repo
 
     def install(self, repo, values=None):
-        return wr.install(values or self.values, repo, repo / "weather_report.py", "/usr/bin/python3",
+        return install.install(values or self.values, repo, repo / "weather_report.py", "/usr/bin/python3",
                           self.cron_dir, self.logrotate_dir, self.log_dir)
 
 

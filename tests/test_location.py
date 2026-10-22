@@ -15,7 +15,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import weather_report as wr  # noqa: E402
-from src import config, report  # noqa: E402
+from src import config, location, report  # noqa: E402
 
 WEBHOOK = "https://discord.com/api/webhooks/123456/abc"
 
@@ -48,7 +48,7 @@ def quiet():
 class TestGeocode(unittest.TestCase):
     def test_parses_us_results_only(self):
         fetch = FakeFetch(EVANS)
-        places = wr.geocode("Evans, GA", "ua", fetch=fetch)
+        places = location.geocode("Evans, GA", "ua", fetch=fetch)
         self.assertEqual(len(places), 2)  # Canadian result dropped
         self.assertEqual(places[0], {"name": "Evans, GA", "detail": "Columbia County, Georgia",
                                      "lat": 33.5338, "lon": -82.1307})
@@ -56,37 +56,37 @@ class TestGeocode(unittest.TestCase):
 
     def test_request(self):
         fetch = FakeFetch({})
-        wr.geocode("  Evans, GA ", "weather-reporter/1.0 (me)", fetch=fetch)
+        location.geocode("  Evans, GA ", "weather-reporter/1.0 (me)", fetch=fetch)
         url, ua, kwargs = fetch.calls[0]
         query = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
-        self.assertTrue(url.startswith(wr.GEOCODE_URL))
+        self.assertTrue(url.startswith(location.GEOCODE_URL))
         self.assertEqual(query["name"], ["Evans, GA"])
         self.assertEqual(query["countryCode"], ["US"])
         self.assertEqual(ua, "weather-reporter/1.0 (me)")
         self.assertEqual(kwargs["accept"], "application/json")
 
     def test_no_results(self):
-        self.assertEqual(wr.geocode("Nowhere, ZZ", "ua", fetch=FakeFetch({})), [])
+        self.assertEqual(location.geocode("Nowhere, ZZ", "ua", fetch=FakeFetch({})), [])
 
     def test_describe(self):
-        place = wr.geocode("Evans, GA", "ua", fetch=FakeFetch(EVANS))[0]
-        self.assertEqual(wr.describe_place(place), "Evans, GA (Columbia County, Georgia)  33.5338, -82.1307")
+        place = location.geocode("Evans, GA", "ua", fetch=FakeFetch(EVANS))[0]
+        self.assertEqual(location.describe_place(place), "Evans, GA (Columbia County, Georgia)  33.5338, -82.1307")
 
 
 class TestLocationInSetup(unittest.TestCase):
-    def collect(self, argv, lookup, choose=wr.first_place):
+    def collect(self, argv, lookup, choose=location.first_place):
         args = wr.build_parser().parse_args(["--yes", "--webhook", WEBHOOK, *argv])
         with quiet():
             return wr.collect_values(args, {}, lookup=lookup, choose=choose)
 
     def test_location_lookup_uses_first_match(self):
-        places = wr.geocode("Evans", "ua", fetch=FakeFetch(EVANS))
+        places = location.geocode("Evans", "ua", fetch=FakeFetch(EVANS))
         values = self.collect(["--location", "Evans"], lookup=lambda q: places)
         self.assertEqual(values["LOCATION_NAME"], "Evans, GA")
         self.assertEqual((values["LATITUDE"], values["LONGITUDE"]), ("33.5338", "-82.1307"))
 
     def test_custom_chooser(self):
-        places = wr.geocode("Evans", "ua", fetch=FakeFetch(EVANS))
+        places = location.geocode("Evans", "ua", fetch=FakeFetch(EVANS))
         values = self.collect(["--location", "Evans"], lookup=lambda q: places, choose=lambda p: p[1])
         self.assertEqual(values["LOCATION_NAME"], "Evans, CO")
 
