@@ -20,13 +20,13 @@ from src import config, location, report, wizard  # noqa: E402
 WEBHOOK = "https://discord.com/api/webhooks/123456/abc"
 
 # Shape from the Open-Meteo geocoding docs (https://open-meteo.com/en/docs/geocoding-api)
-EVANS = {
+NEW_YORK = {
     "results": [
-        {"name": "Evans", "latitude": 33.53376, "longitude": -82.13067, "country_code": "US",
-         "admin1": "Georgia", "admin2": "Columbia County"},
-        {"name": "Evans", "latitude": 40.37637, "longitude": -104.69220, "country_code": "US",
-         "admin1": "Colorado", "admin2": "Weld County"},
-        {"name": "Evans", "latitude": 1.0, "longitude": 1.0, "country_code": "CA", "admin1": "Ontario"},
+        {"name": "New York", "latitude": 40.71427, "longitude": -74.00597, "country_code": "US",
+         "admin1": "New York", "admin2": "New York County"},
+        {"name": "New York", "latitude": 32.16793, "longitude": -95.66913, "country_code": "US",
+         "admin1": "Texas", "admin2": "Henderson County"},
+        {"name": "New York", "latitude": 1.0, "longitude": 1.0, "country_code": "CA", "admin1": "Ontario"},
     ]
 }
 
@@ -47,20 +47,20 @@ def quiet():
 
 class TestGeocode(unittest.TestCase):
     def test_parses_us_results_only(self):
-        fetch = FakeFetch(EVANS)
-        places = location.geocode("Evans, GA", "ua", fetch=fetch)
+        fetch = FakeFetch(NEW_YORK)
+        places = location.geocode("New York, NY", "ua", fetch=fetch)
         self.assertEqual(len(places), 2)  # Canadian result dropped
-        self.assertEqual(places[0], {"name": "Evans, GA", "detail": "Columbia County, Georgia",
-                                     "lat": 33.5338, "lon": -82.1307})
-        self.assertEqual(places[1]["name"], "Evans, CO")
+        self.assertEqual(places[0], {"name": "New York, NY", "detail": "New York County, New York",
+                                     "lat": 40.7143, "lon": -74.0060})
+        self.assertEqual(places[1]["name"], "New York, TX")
 
     def test_request(self):
         fetch = FakeFetch({})
-        location.geocode("  Evans, GA ", "weather-reporter/1.0 (me)", fetch=fetch)
+        location.geocode("  New York, NY ", "weather-reporter/1.0 (me)", fetch=fetch)
         url, ua, kwargs = fetch.calls[0]
         query = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
         self.assertTrue(url.startswith(location.GEOCODE_URL))
-        self.assertEqual(query["name"], ["Evans, GA"])
+        self.assertEqual(query["name"], ["New York, NY"])
         self.assertEqual(query["countryCode"], ["US"])
         self.assertEqual(ua, "weather-reporter/1.0 (me)")
         self.assertEqual(kwargs["accept"], "application/json")
@@ -69,8 +69,8 @@ class TestGeocode(unittest.TestCase):
         self.assertEqual(location.geocode("Nowhere, ZZ", "ua", fetch=FakeFetch({})), [])
 
     def test_describe(self):
-        place = location.geocode("Evans, GA", "ua", fetch=FakeFetch(EVANS))[0]
-        self.assertEqual(location.describe_place(place), "Evans, GA (Columbia County, Georgia)  33.5338, -82.1307")
+        place = location.geocode("New York, NY", "ua", fetch=FakeFetch(NEW_YORK))[0]
+        self.assertEqual(location.describe_place(place), "New York, NY (New York County, New York)  40.7143, -74.0060")
 
 
 class TestLocationInSetup(unittest.TestCase):
@@ -80,15 +80,15 @@ class TestLocationInSetup(unittest.TestCase):
             return wizard.collect_values(args, {}, lookup=lookup, choose=choose)
 
     def test_location_lookup_uses_first_match(self):
-        places = location.geocode("Evans", "ua", fetch=FakeFetch(EVANS))
-        values = self.collect(["--location", "Evans"], lookup=lambda q: places)
-        self.assertEqual(values["LOCATION_NAME"], "Evans, GA")
-        self.assertEqual((values["LATITUDE"], values["LONGITUDE"]), ("33.5338", "-82.1307"))
+        places = location.geocode("New York", "ua", fetch=FakeFetch(NEW_YORK))
+        values = self.collect(["--location", "New York"], lookup=lambda q: places)
+        self.assertEqual(values["LOCATION_NAME"], "New York, NY")
+        self.assertEqual((values["LATITUDE"], values["LONGITUDE"]), ("40.7143", "-74.0060"))
 
     def test_custom_chooser(self):
-        places = location.geocode("Evans", "ua", fetch=FakeFetch(EVANS))
-        values = self.collect(["--location", "Evans"], lookup=lambda q: places, choose=lambda p: p[1])
-        self.assertEqual(values["LOCATION_NAME"], "Evans, CO")
+        places = location.geocode("New York", "ua", fetch=FakeFetch(NEW_YORK))
+        values = self.collect(["--location", "New York"], lookup=lambda q: places, choose=lambda p: p[1])
+        self.assertEqual(values["LOCATION_NAME"], "New York, TX")
 
     def test_lat_lon_skip_lookup(self):
         def fail(q):
@@ -100,7 +100,7 @@ class TestLocationInSetup(unittest.TestCase):
         def down(q):
             raise RuntimeError("network down")
         with self.assertRaises(config.SetupError) as ctx:
-            self.collect(["--location", "Evans, GA"], lookup=down)
+            self.collect(["--location", "New York, NY"], lookup=down)
         self.assertIn("--lat and --lon", str(ctx.exception))
 
     def test_no_match_is_an_error(self):

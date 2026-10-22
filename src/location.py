@@ -26,7 +26,7 @@ US_STATES = {
 
 
 def geocode(query: str, user_agent: str, fetch=None) -> list:
-    """'Evans, GA' -> US matches from Open-Meteo (GeoNames data), best match first."""
+    """'New York, NY' -> US matches from Open-Meteo (GeoNames data), best match first."""
     fetch = fetch or http_get_json
     params = urllib.parse.urlencode({
         "name": query.strip(), "count": 10, "language": "en", "countryCode": "US", "format": "json",

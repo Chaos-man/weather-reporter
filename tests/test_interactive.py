@@ -13,8 +13,8 @@ from src import wizard  # noqa: E402
 
 WEBHOOK = "https://discord.com/api/webhooks/1562538190261452942/IACEvp57TPuvBTMR2WZmO4AdQLcU"
 NEW_WEBHOOK = "https://discord.com/api/webhooks/999/newtoken"
-EVANS_GA = {"name": "Evans, GA", "detail": "Columbia County, Georgia", "lat": 33.5338, "lon": -82.1307}
-EVANS_CO = {"name": "Evans, CO", "detail": "Weld County, Colorado", "lat": 40.3764, "lon": -104.6922}
+NEW_YORK_NY = {"name": "New York, NY", "detail": "New York County, New York", "lat": 40.7143, "lon": -74.0060}
+NEW_YORK_TX = {"name": "New York, TX", "detail": "Henderson County, Texas", "lat": 32.1679, "lon": -95.6691}
 
 
 class Script:
@@ -31,7 +31,7 @@ class Script:
         return self.answers.pop(0)
 
 
-def run(argv, existing, answers, lookup=lambda q: [EVANS_GA]):
+def run(argv, existing, answers, lookup=lambda q: [NEW_YORK_NY]):
     args = wr.build_parser().parse_args(argv)
     script = Script(*answers)
     with contextlib.redirect_stdout(io.StringIO()) as out:
@@ -58,13 +58,13 @@ class TestFirstRun(unittest.TestCase):
     def test_answers_everything(self):
         values, script, _ = run([], {}, [
             "not-a-url", WEBHOOK,       # bad webhook is re-asked
-            "Evans, GA", "",            # lookup, confirm the single match
+            "New York, NY", "",         # lookup, confirm the single match
             "25:00", "7:30",            # bad time is re-asked
             "me@example.com",
         ])
         self.assertEqual(values["DISCORD_WEBHOOK_URL"], WEBHOOK)
-        self.assertEqual(values["LOCATION_NAME"], "Evans, GA")
-        self.assertEqual((values["LATITUDE"], values["LONGITUDE"]), ("33.5338", "-82.1307"))
+        self.assertEqual(values["LOCATION_NAME"], "New York, NY")
+        self.assertEqual((values["LATITUDE"], values["LONGITUDE"]), ("40.7143", "-74.0060"))
         self.assertEqual(values["RUN_TIME"], "07:30")
         self.assertEqual(values["CONTACT"], "me@example.com")
         self.assertEqual(values["RAIN_THRESHOLD"], "30")  # thresholds aren't asked
@@ -79,20 +79,21 @@ class TestFirstRun(unittest.TestCase):
 
 class TestLocationQuestion(unittest.TestCase):
     def test_pick_from_several(self):
-        values, _, out = run([], {}, [WEBHOOK, "Evans", "2", "", ""],
-                             lookup=lambda q: [EVANS_GA, EVANS_CO])
-        self.assertEqual(values["LOCATION_NAME"], "Evans, CO")
-        self.assertIn("2) Evans, CO (Weld County, Colorado)", out)
+        values, _, out = run([], {}, [WEBHOOK, "New York", "2", "", ""],
+                             lookup=lambda q: [NEW_YORK_NY, NEW_YORK_TX])
+        self.assertEqual(values["LOCATION_NAME"], "New York, TX")
+        self.assertIn("2) New York, TX (Henderson County, Texas)", out)
 
     def test_reject_and_search_again(self):
-        values, _, _ = run([], {}, [WEBHOOK, "Evans", "n", "Evans, CO", "", "", ""],
-                           lookup=lambda q: [EVANS_CO] if q.endswith("CO") else [EVANS_GA])
-        self.assertEqual(values["LOCATION_NAME"], "Evans, CO")
+        values, _, _ = run([], {}, [WEBHOOK, "New York", "n", "New York, TX", "", "", ""],
+                           lookup=lambda q: [NEW_YORK_TX] if q.endswith("TX") else [NEW_YORK_NY])
+        self.assertEqual(values["LOCATION_NAME"], "New York, TX")
 
     def test_zero_searches_again(self):
-        values, _, _ = run([], {}, [WEBHOOK, "Evans", "0", "Evans", "1", "", ""],
-                           lookup=lambda q: [EVANS_GA, EVANS_CO])
-        self.assertEqual(values["LOCATION_NAME"], "Evans, GA")
+        values, _, _ = run([], {}, [WEBHOOK, "New York", "0", "New York", "1", "", ""],
+                           lookup=lambda q: [NEW_YORK_NY, NEW_YORK_TX])
+        self.assertEqual(values["LOCATION_NAME"], "New York, NY")
+        self.assertEqual(values["LATITUDE"], "40.7143")  # looked up, not the 40.7128 default
 
     def test_no_match_or_network_error_asks_again(self):
         calls = []
@@ -103,18 +104,19 @@ class TestLocationQuestion(unittest.TestCase):
                 return []
             if q == "Offline":
                 raise RuntimeError("network down")
-            return [EVANS_GA]
+            return [NEW_YORK_NY]
 
-        values, _, out = run([], {}, [WEBHOOK, "Nowhere", "Offline", "Evans, GA", "", "", ""], lookup=lookup)
-        self.assertEqual(calls, ["Nowhere", "Offline", "Evans, GA"])
+        values, _, out = run([], {}, [WEBHOOK, "Nowhere", "Offline", "New York, NY", "", "", ""], lookup=lookup)
+        self.assertEqual(calls, ["Nowhere", "Offline", "New York, NY"])
         self.assertIn("No US place found", out)
         self.assertIn("Couldn't reach", out)
-        self.assertEqual(values["LOCATION_NAME"], "Evans, GA")
+        self.assertEqual(values["LOCATION_NAME"], "New York, NY")
+        self.assertEqual(values["LATITUDE"], "40.7143")  # looked up, not the 40.7128 default
 
 
 class TestReconfigure(unittest.TestCase):
-    existing = {"DISCORD_WEBHOOK_URL": WEBHOOK, "LOCATION_NAME": "Evans, GA", "LATITUDE": "33.5338",
-                "LONGITUDE": "-82.1307", "RUN_TIME": "06:45", "CONTACT": "me@example.com",
+    existing = {"DISCORD_WEBHOOK_URL": WEBHOOK, "LOCATION_NAME": "New York, TX", "LATITUDE": "32.1679",
+                "LONGITUDE": "-95.6691", "RUN_TIME": "06:45", "CONTACT": "me@example.com",
                 "FREEZE_THRESHOLD_F": "34"}
 
     def test_enter_keeps_everything_without_lookup(self):
@@ -125,13 +127,13 @@ class TestReconfigure(unittest.TestCase):
             self.assertEqual(values[key], value, key)
         self.assertIn("****QLcU", script.prompts[0])          # masked, not the full token
         self.assertNotIn("IACEvp57", script.prompts[0])
-        self.assertIn("[Evans, GA]", script.prompts[1])
+        self.assertIn("[New York, TX]", script.prompts[1])
         self.assertIn("[06:45]", script.prompts[2])
 
     def test_change_only_webhook(self):
         values, _, _ = run([], self.existing, [NEW_WEBHOOK, "", "", ""])
         self.assertEqual(values["DISCORD_WEBHOOK_URL"], NEW_WEBHOOK)
-        self.assertEqual(values["LOCATION_NAME"], "Evans, GA")
+        self.assertEqual(values["LOCATION_NAME"], "New York, TX")
 
 
 class TestFlagsSkipQuestions(unittest.TestCase):

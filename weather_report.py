@@ -49,7 +49,7 @@ def build_parser() -> argparse.ArgumentParser:
     setup.add_argument("--yes", "-y", action="store_true",
                        help="don't ask questions; use flags, then existing config, then defaults")
     setup.add_argument("--webhook", metavar="URL", help="Discord webhook URL (note: saved in shell history)")
-    setup.add_argument("--location", metavar='"CITY, ST"', help='location, e.g. "Evans, GA"')
+    setup.add_argument("--location", metavar='"CITY, ST"', help='location, e.g. "New York, NY"')
     setup.add_argument("--lat", type=float, help="latitude (skips the city lookup)")
     setup.add_argument("--lon", type=float, help="longitude (skips the city lookup)")
     setup.add_argument("--time", metavar="HH:MM", help="daily run time, 24-hour, system time zone")

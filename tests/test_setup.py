@@ -67,9 +67,9 @@ class TestCollectValues(unittest.TestCase):
 
     def test_lat_lon_and_location_label(self):
         values = wizard.collect_values(setup_args(
-            ["--webhook", WEBHOOK, "--location", "Evans, GA", "--lat", "33.53371", "--lon", "-82.1307"]), {})
-        self.assertEqual((values["LATITUDE"], values["LONGITUDE"]), ("33.5337", "-82.1307"))
-        self.assertEqual(values["LOCATION_NAME"], "Evans, GA")
+            ["--webhook", WEBHOOK, "--location", "New York, NY", "--lat", "40.71431", "--lon", "-74.0060"]), {})
+        self.assertEqual((values["LATITUDE"], values["LONGITUDE"]), ("40.7143", "-74.0060"))
+        self.assertEqual(values["LOCATION_NAME"], "New York, NY")
 
     def test_existing_unknown_keys_are_kept(self):
         values = wizard.collect_values(setup_args([]), {"DISCORD_WEBHOOK_URL": WEBHOOK, "MY_NOTE": "hi"})
@@ -180,9 +180,9 @@ class TestInstall(InstallCase):
 
     def test_existing_config_values_round_trip(self):
         repo = self.repo("weather-reporter")
-        self.install(repo, dict(self.values, LOCATION_NAME="Evans, GA", MY_NOTE="kept"))
+        self.install(repo, dict(self.values, LOCATION_NAME="New York, TX", MY_NOTE="kept"))
         again = wizard.collect_values(setup_args([]), config.parse_env_file(repo / "config.env"))
-        self.assertEqual(again["LOCATION_NAME"], "Evans, GA")
+        self.assertEqual(again["LOCATION_NAME"], "New York, TX")
         self.assertEqual(again["MY_NOTE"], "kept")
 
 

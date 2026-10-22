@@ -68,10 +68,10 @@ class TestConfig(unittest.TestCase):
 
     def test_quotes_comments_and_export(self):
         cfg = config.load_config(self.write(
-            '# comment\n\nLOCATION_NAME="Evans, GA"\nRAIN_THRESHOLD=40\n'
+            '# comment\n\nLOCATION_NAME="New York, TX"\nRAIN_THRESHOLD=40\n'
             "export CONTACT='me@example.com'\nnot a setting\n"
         ))
-        self.assertEqual(cfg["LOCATION_NAME"], "Evans, GA")
+        self.assertEqual(cfg["LOCATION_NAME"], "New York, TX")
         self.assertEqual(cfg["RAIN_THRESHOLD"], "40")
         self.assertEqual(cfg["CONTACT"], "me@example.com")
 

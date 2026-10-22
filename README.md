@@ -79,7 +79,7 @@ Setup asks four questions. Press Enter to keep the value shown in brackets:
 | Question | Notes |
 |---|---|
 | Discord webhook URL | Channel Settings > Integrations > Webhooks |
-| Location (City, ST) | For example `Evans, GA`. Setup looks up the coordinates and asks you to confirm, or to pick from a list if there are several matches |
+| Location (City, ST) | For example `New York, NY`. Setup looks up the coordinates and asks you to confirm, or to pick from a list if there are several matches |
 | Daily run time | 24-hour `HH:MM`, in the container's time zone |
 | Contact email | Optional. Sent to NWS in the User-Agent header, which they ask for |
 
@@ -105,7 +105,7 @@ Every question has a flag, and anything given as a flag isn't asked. Add `--yes`
 
 ```bash
 ./weather_report.py --yes --webhook "https://discord.com/api/webhooks/..." \
-  --location "Evans, GA" --time 07:30 --contact you@example.com
+  --location "New York, NY" --time 07:30 --contact you@example.com
 ```
 
 | Flag | Sets |
