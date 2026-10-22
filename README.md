@@ -131,6 +131,7 @@ The thresholds aren't asked during interactive setup. Set them with these flags,
 | `./weather_report.py --run` | Fetch the forecast and post to Discord (what cron runs) |
 | `./weather_report.py --dry-run` | Fetch the forecast and print the Discord payload; nothing is posted |
 | `./weather_report.py --test` | Post to Discord with `[TEST]` in the title |
+| `./weather_report.py --version` | Show the installed version |
 | `./weather_report.py --help` | All options |
 
 ## Configuration
@@ -205,6 +206,24 @@ Older versions used `setup.sh` and a `weather-reporter` service user. After `git
 - makes `config.env` root-only
 
 Until you do, the old cron job fails with a "use --run" error instead of posting. Once no install uses the old user anymore, setup prints the command to remove it (`userdel weather-reporter`).
+
+## Releases
+
+Releases are listed on the repo's [Releases page](https://github.com/Chaos-man/weather-reporter/releases). To install a specific release instead of the latest `main`:
+
+```bash
+git clone --branch v1.0 https://github.com/Chaos-man/weather-reporter.git /opt/weather-reporter
+```
+
+To publish a new release:
+
+1. Update `__version__` in `weather_report.py` (for example `"1.1"`) and push that commit to `main`.
+2. Tag the commit and push the tag:
+   ```bash
+   git tag v1.1 && git push origin v1.1
+   ```
+
+The Release workflow then runs the tests, checks that the tag matches `__version__`, and creates the GitHub release with notes generated from the commits since the previous release. If the tests fail or the version doesn't match, no release is created.
 
 ## Troubleshooting
 

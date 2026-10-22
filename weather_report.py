@@ -29,6 +29,8 @@ import urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
 
+__version__ = "1.0"
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = SCRIPT_DIR / "config.env"
 NWS_BASE = "https://api.weather.gov"
@@ -275,7 +277,7 @@ def build_embed(data: dict, cfg: dict, now: datetime, test: bool = False) -> dic
 # Report (--run / --dry-run / --test)
 # --------------------------------------------------------------------------- #
 def user_agent_for(cfg: dict) -> str:
-    return f"weather-reporter/1.0 ({cfg.get('CONTACT') or 'no-contact-set'})"
+    return f"weather-reporter/{__version__} ({cfg.get('CONTACT') or 'no-contact-set'})"
 
 
 def build_payload(cfg: dict, now: datetime, test: bool = False) -> dict:
@@ -786,6 +788,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Daily NWS weather report for Discord. "
                     "With no mode flag, runs setup for this install.",
     )
+    parser.add_argument("--version", action="version", version=f"weather-reporter {__version__}")
     modes = parser.add_argument_group("modes (pick one; default is setup)")
     exclusive = modes.add_mutually_exclusive_group()
     exclusive.add_argument("--run", action="store_true", help="fetch the forecast and post to Discord (used by cron)")

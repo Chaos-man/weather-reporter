@@ -2,7 +2,9 @@ name: Tests
 
 on:
   push:
+    branches: ["**"]   # tags are tested by the release workflow
   pull_request:
+  workflow_call:       # reused by release.yml
 
 jobs:
   unit-tests:

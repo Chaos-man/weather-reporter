@@ -43,6 +43,13 @@ class TestModeSelection(unittest.TestCase):
         with self.assertRaises(wr.UsageError):
             mode(["--run", "--yes"])
 
+    def test_version(self):
+        self.assertRegex(wr.__version__, r"^\d+\.\d+$")  # matches release tags like v1.0
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), self.assertRaises(SystemExit):
+            wr.build_parser().parse_args(["--version"])
+        self.assertEqual(out.getvalue().strip(), f"weather-reporter {wr.__version__}")
+
     def test_report_modes_are_exclusive(self):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             wr.build_parser().parse_args(["--run", "--test"])
